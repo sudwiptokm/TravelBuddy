@@ -35,7 +35,7 @@ const sampleEntries = [
   },
 ];
 
-export default function MapViewAlternative() {
+export default function MapViewAlternativeScreen() {
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
 
   useEffect(() => {

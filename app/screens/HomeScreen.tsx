@@ -4,8 +4,8 @@ import { SafeAreaView, ScrollView, Text, TouchableOpacity, View } from 'react-na
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect, useState } from 'react';
-import { TravelEntry, getEntries } from '../app/utils/storage';
-import { TravelCard } from './TravelCard';
+import { TravelCard } from '../../components/TravelCard';
+import { TravelEntry, getEntries } from '../utils/storage';
 
 // Define the navigation param types
 type RootStackParamList = {
@@ -17,7 +17,7 @@ type RootStackParamList = {
 
 type ScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
-export default function ScreenContent() {
+export default function HomeScreen() {
   const navigation = useNavigation<ScreenNavigationProp>();
   const [entries, setEntries] = useState<TravelEntry[]>([]);
   const [loading, setLoading] = useState(true);

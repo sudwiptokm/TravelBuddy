@@ -8,9 +8,9 @@ import './global.css';
 
 // Import screens
 import ChatScreen from './app/screens/ChatScreen';
-import CreateEntryScreen from './app/screens/CreateEntry';
+import CreateEntryScreen from './app/screens/CreateEntryScreen';
+import HomeScreen from './app/screens/HomeScreen';
 import EntryDetailScreen from './components/EntryDetails';
-import ScreenContent from './components/ScreenContent';
 // We'll use this later when maps is working
 // import MapViewScreen from './app/screens/MapView';
 
@@ -38,7 +38,7 @@ function HomeTabs() {
         tabBarInactiveTintColor: 'gray',
         headerShown: false,
       })}>
-      <Tab.Screen name="Feed" component={ScreenContent} />
+      <Tab.Screen name="Feed" component={HomeScreen} />
       {/* <Tab.Screen name="Map" component={MapViewAlternative} /> */}
       {/* <Tab.Screen name="Profile" component={ProfileScreen} /> */}
     </Tab.Navigator>
