@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useState } from 'react';
-import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { saveEntry } from '../utils/storage';
 
 export default function CreateEntryScreen() {
   const [title, setTitle] = useState('');
@@ -48,7 +48,7 @@ export default function CreateEntryScreen() {
     }
   };
 
-  const getCurrentLocation = async () => {
+  const getLocation = async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
 
     if (status !== 'granted') {
@@ -56,21 +56,20 @@ export default function CreateEntryScreen() {
       return;
     }
 
-    const location = await Location.getCurrentPositionAsync({});
-    setLocation(location);
+    const currentLocation = await Location.getCurrentPositionAsync({});
+    setLocation(currentLocation);
 
-    // Get location name from coordinates
+    // Get location name
     try {
       const [address] = await Location.reverseGeocodeAsync({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
+        latitude: currentLocation.coords.latitude,
+        longitude: currentLocation.coords.longitude,
       });
 
       if (address) {
         const locationString = [address.city, address.region, address.country]
           .filter(Boolean)
           .join(', ');
-
         setLocationName(locationString);
       }
     } catch (error) {
@@ -78,72 +77,56 @@ export default function CreateEntryScreen() {
     }
   };
 
-  const saveEntry = async () => {
+  const handleSave = async () => {
+    if (!title.trim()) {
+      Alert.alert('Missing Information', 'Please enter a title for your travel memory.');
+      return;
+    }
+
+    if (!location) {
+      Alert.alert('Missing Location', 'Please add a location to your travel memory.');
+      return;
+    }
+
     setIsSaving(true);
     try {
-      // Implement the save functionality directly here instead of importing
-      const STORAGE_KEY = 'travel_entries';
-
-      // Format the entry
-      const entry = {
+      await saveEntry({
         title,
         description,
         date: new Date().toISOString(),
         location: {
           name: locationName,
-          coordinates: location
-            ? {
-                latitude: location.coords.latitude,
-                longitude: location.coords.longitude,
-              }
-            : {
-                latitude: 0,
-                longitude: 0,
-              },
+          coordinates: {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+          },
         },
         images,
-      };
+      });
 
-      // Create new entry with ID
-      const newEntry = {
-        ...entry,
-        id: Date.now().toString(),
-      };
-
-      // Get existing entries
-      const existingEntriesJSON = await AsyncStorage.getItem(STORAGE_KEY);
-      const existingEntries = existingEntriesJSON ? JSON.parse(existingEntriesJSON) : [];
-
-      // Save updated entries
-      const updatedEntries = [newEntry, ...existingEntries];
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedEntries));
-
-      // Show success message
-      alert('Entry saved successfully!');
-
-      // Navigate back to the home screen
+      Alert.alert('Success', 'Your travel memory has been saved!');
       navigation.goBack();
     } catch (error) {
       console.error('Error saving entry:', error);
-      alert('Failed to save entry. Please try again.');
+      Alert.alert('Error', 'Failed to save your travel memory. Please try again.');
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const removeImage = (index: number) => {
+    setImages(images.filter((_, i) => i !== index));
   };
 
   return (
     <SafeAreaView className="flex-1 bg-white">
       <View className="flex-row items-center justify-between border-b border-gray-200 px-4 py-2">
         <TouchableOpacity className="p-2" onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#2563eb" />
+          <Ionicons name="close" size={24} color="#2563eb" />
         </TouchableOpacity>
-        <Text className="text-xl font-bold">New Travel Entry</Text>
-        <TouchableOpacity
-          className="p-2"
-          onPress={saveEntry}
-          disabled={!title || !description || isSaving}>
-          <Text
-            className={`font-bold ${!title || !description || isSaving ? 'text-gray-400' : 'text-blue-600'}`}>
+        <Text className="text-xl font-bold">New Travel Memory</Text>
+        <TouchableOpacity className="p-2" onPress={handleSave} disabled={isSaving}>
+          <Text className={`font-bold ${isSaving ? 'text-gray-400' : 'text-blue-600'}`}>
             {isSaving ? 'Saving...' : 'Save'}
           </Text>
         </TouchableOpacity>
@@ -151,76 +134,58 @@ export default function CreateEntryScreen() {
 
       <ScrollView className="flex-1 p-4">
         <TextInput
-          className="mb-4 border-b border-gray-200 p-2 text-xl font-bold"
-          placeholder="Title your experience"
+          className="mb-4 rounded-lg border border-gray-300 bg-gray-50 p-4 text-lg"
+          placeholder="Title"
           value={title}
           onChangeText={setTitle}
         />
 
-        <View className="mb-4">
-          <View className="mb-2 flex-row items-center justify-between">
-            <Text className="text-lg font-semibold">Photos</Text>
-            <View className="flex-row">
-              <TouchableOpacity className="mr-2 rounded-full bg-blue-600 p-2" onPress={takePhoto}>
-                <Ionicons name="camera" size={20} color="white" />
-              </TouchableOpacity>
-              <TouchableOpacity className="rounded-full bg-blue-600 p-2" onPress={pickImage}>
-                <Ionicons name="image" size={20} color="white" />
-              </TouchableOpacity>
-            </View>
-          </View>
+        <TextInput
+          className="mb-4 h-32 rounded-lg border border-gray-300 bg-gray-50 p-4"
+          placeholder="Description (optional)"
+          value={description}
+          onChangeText={setDescription}
+          multiline
+          textAlignVertical="top"
+        />
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-2">
+        <View className="mb-4">
+          <Text className="mb-2 font-bold text-gray-700">Location</Text>
+          <TouchableOpacity
+            className="flex-row items-center rounded-lg border border-gray-300 bg-gray-50 p-4"
+            onPress={getLocation}>
+            <Ionicons name="location-outline" size={24} color="#9ca3af" />
+            <Text className="ml-2 flex-1 text-gray-700">{locationName || 'Add location'}</Text>
+            {location && <Ionicons name="checkmark-circle" size={24} color="#10b981" />}
+          </TouchableOpacity>
+        </View>
+
+        <View className="mb-4">
+          <Text className="mb-2 font-bold text-gray-700">Photos</Text>
+          <View className="flex-row flex-wrap">
             {images.map((uri, index) => (
-              <View key={index} className="relative mr-2">
-                <Image source={{ uri }} className="h-24 w-24 rounded-md" />
+              <View key={index} className="relative m-1 h-24 w-24">
+                <Image source={{ uri }} className="h-24 w-24 rounded-lg" />
                 <TouchableOpacity
                   className="absolute right-1 top-1 rounded-full bg-black bg-opacity-50 p-1"
-                  onPress={() => setImages(images.filter((_, i) => i !== index))}>
+                  onPress={() => removeImage(index)}>
                   <Ionicons name="close" size={16} color="white" />
                 </TouchableOpacity>
               </View>
             ))}
-            {images.length === 0 && (
-              <View className="h-24 w-24 items-center justify-center rounded-md bg-gray-200">
-                <Ionicons name="images-outline" size={32} color="#9ca3af" />
-              </View>
-            )}
-          </ScrollView>
-        </View>
-
-        <View className="mb-4">
-          <View className="mb-2 flex-row items-center justify-between">
-            <Text className="text-lg font-semibold">Location</Text>
-            <TouchableOpacity className="rounded-full bg-blue-600 p-2" onPress={getCurrentLocation}>
-              <Ionicons name="locate" size={20} color="white" />
+            <TouchableOpacity
+              className="m-1 h-24 w-24 items-center justify-center rounded-lg border-2 border-dashed border-gray-300"
+              onPress={pickImage}>
+              <Ionicons name="images-outline" size={24} color="#9ca3af" />
+              <Text className="mt-1 text-xs text-gray-500">Gallery</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              className="m-1 h-24 w-24 items-center justify-center rounded-lg border-2 border-dashed border-gray-300"
+              onPress={takePhoto}>
+              <Ionicons name="camera-outline" size={24} color="#9ca3af" />
+              <Text className="mt-1 text-xs text-gray-500">Camera</Text>
             </TouchableOpacity>
           </View>
-
-          {location ? (
-            <View className="rounded-md bg-gray-100 p-3">
-              <Text className="font-medium">{locationName || 'Selected Location'}</Text>
-              <Text className="text-sm text-gray-500">
-                {location.coords.latitude.toFixed(4)}°, {location.coords.longitude.toFixed(4)}°
-              </Text>
-            </View>
-          ) : (
-            <TouchableOpacity className="rounded-md bg-gray-100 p-3" onPress={getCurrentLocation}>
-              <Text className="text-gray-500">Tap to add location</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        <View className="mb-4">
-          <Text className="mb-2 text-lg font-semibold">Notes</Text>
-          <TextInput
-            className="min-h-[120px] rounded-md bg-gray-100 p-3 text-base"
-            placeholder="Write about your experience..."
-            multiline
-            textAlignVertical="top"
-            value={description}
-            onChangeText={setDescription}
-          />
         </View>
       </ScrollView>
     </SafeAreaView>

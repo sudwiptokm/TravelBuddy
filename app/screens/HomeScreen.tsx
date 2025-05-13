@@ -13,6 +13,8 @@ type RootStackParamList = {
   CreateEntry: undefined;
   Chat: undefined;
   EntryDetail: { entryId: string };
+  Conversations: undefined;
+  Profile: undefined;
 };
 
 type ScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -23,37 +25,39 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Load entries when the component mounts
+    const loadEntries = async () => {
+      setLoading(true);
+      try {
+        const fetchedEntries = await getEntries();
+        setEntries(fetchedEntries);
+      } catch (error) {
+        console.error('Error loading entries:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
     loadEntries();
 
-    // Add a focus listener to reload entries when navigating back to this screen
-    const unsubscribe = navigation.addListener('focus', () => {
-      loadEntries();
-    });
-
-    // Clean up the listener
+    // Refresh when screen is focused
+    const unsubscribe = navigation.addListener('focus', loadEntries);
     return unsubscribe;
   }, [navigation]);
-
-  const loadEntries = async () => {
-    setLoading(true);
-    try {
-      const travelEntries = await getEntries();
-      setEntries(travelEntries);
-    } catch (error) {
-      console.error('Error loading entries:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   return (
     <SafeAreaView className="flex-1 bg-white">
       <View className="flex-row items-center justify-between border-b border-gray-200 px-4 py-2">
-        <Text className="text-2xl font-bold text-blue-600">TravelShare</Text>
-        <TouchableOpacity className="p-2" onPress={() => navigation.navigate('Chat')}>
-          <Ionicons name="chatbubbles-outline" size={24} color="#2563eb" />
-        </TouchableOpacity>
+        <Text className="text-2xl font-bold text-blue-600">TravelBuddy</Text>
+        <View className="flex-row">
+          <TouchableOpacity
+            className="mr-2 p-2"
+            onPress={() => navigation.navigate('Conversations')}>
+            <Ionicons name="chatbubbles-outline" size={24} color="#2563eb" />
+          </TouchableOpacity>
+          <TouchableOpacity className="p-2" onPress={() => navigation.navigate('Profile')}>
+            <Ionicons name="person-circle-outline" size={24} color="#2563eb" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView className="flex-1">

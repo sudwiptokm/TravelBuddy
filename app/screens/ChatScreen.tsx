@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
-import { useState } from 'react';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { User } from '@supabase/supabase-js';
+import { useEffect, useRef, useState } from 'react';
 import {
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Text,
@@ -11,71 +13,118 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import MessageBubble from '../components/MessageBubble';
+import {
+  Message,
+  getMessages,
+  markMessagesAsRead,
+  sendMessage,
+  subscribeToMessages,
+} from '../utils/chat';
+import { supabase } from '../utils/supabase';
 
-// Sample data - in a real app, this would come from your backend
-const sampleMessages = [
-  {
-    id: '1',
-    text: 'Hi there! I saw you visited Paris recently.',
-    sender: 'other',
-    timestamp: new Date(Date.now() - 3600000).toISOString(),
-  },
-  {
-    id: '2',
-    text: 'Yes! It was amazing. The Eiffel Tower was spectacular!',
-    sender: 'me',
-    timestamp: new Date(Date.now() - 3500000).toISOString(),
-  },
-  {
-    id: '3',
-    text: 'Did you visit the Louvre Museum?',
-    sender: 'other',
-    timestamp: new Date(Date.now() - 3400000).toISOString(),
-  },
-  {
-    id: '4',
-    text: 'Yes, spent almost a full day there. The Mona Lisa was smaller than I expected though!',
-    sender: 'me',
-    timestamp: new Date(Date.now() - 3300000).toISOString(),
-  },
-];
+type ChatScreenParams = {
+  conversationId: string;
+  recipientName: string;
+  recipientAvatar?: string;
+};
 
 export default function ChatScreen() {
   const navigation = useNavigation();
-  const [messages, setMessages] = useState(sampleMessages);
+  const route = useRoute();
+  const params = route.params as ChatScreenParams;
+
+  const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [recipient, setRecipient] = useState<{
+    name: string;
+    avatar?: string;
+  }>({
+    name: params?.recipientName || 'Travel Buddy',
+    avatar: params?.recipientAvatar,
+  });
 
-  const sendMessage = () => {
-    if (newMessage.trim() === '') return;
+  const flatListRef = useRef<FlatList>(null);
+  const { conversationId } = params;
 
-    const message = {
-      id: Date.now().toString(),
-      text: newMessage,
-      sender: 'me',
-      timestamp: new Date().toISOString(),
+  const [user, setUser] = useState<User | null>(null);
+
+  async function getCurrentUser() {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    return user;
+  }
+
+  useEffect(() => {
+    getCurrentUser().then((user) => {
+      setUser(user);
+    });
+  }, []);
+
+  useEffect(() => {
+    // Load messages
+    const loadMessages = async () => {
+      setLoading(true);
+      try {
+        const fetchedMessages = await getMessages(conversationId);
+        setMessages(fetchedMessages);
+
+        // Mark messages as read
+        await markMessagesAsRead(conversationId);
+      } catch (error) {
+        console.error('Error loading messages:', error);
+      } finally {
+        setLoading(false);
+      }
     };
 
-    setMessages([...messages, message]);
+    loadMessages();
+
+    // Subscribe to new messages
+    const subscription = subscribeToMessages(conversationId, (newMessage) => {
+      setMessages((prevMessages) => [...prevMessages, newMessage]);
+
+      // Mark as read if the app is open
+      if (newMessage.sender_id !== user?.id) {
+        markMessagesAsRead(conversationId);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [conversationId, user?.id]);
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    if (messages.length > 0 && flatListRef.current) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
+  }, [messages]);
+
+  const handleSendMessage = async () => {
+    if (newMessage.trim() === '') return;
+
+    const messageContent = newMessage;
     setNewMessage('');
+
+    try {
+      await sendMessage(conversationId, messageContent);
+    } catch (error) {
+      console.error('Error sending message:', error);
+      alert('Failed to send message. Please try again.');
+    }
   };
 
-  const renderMessage = ({
-    item,
-  }: {
-    item: { id: string; text: string; sender: string; timestamp: string };
-  }) => {
-    const isMe = item.sender === 'me';
+  const renderMessage = ({ item }: { item: Message }) => {
+    const isCurrentUser = item.sender_id === user?.id;
 
-    return (
-      <View className={`mb-2 max-w-[80%] ${isMe ? 'self-end' : 'self-start'}`}>
-        <View className={`rounded-2xl p-3 ${isMe ? 'bg-blue-600' : 'bg-gray-200'}`}>
-          <Text className={isMe ? 'text-white' : 'text-black'}>{item.text}</Text>
-        </View>
-        <Text className="mt-1 text-xs text-gray-500">
-          {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </Text>
-      </View>
-    );
+    return <MessageBubble message={item} isCurrentUser={isCurrentUser} />;
   };
 
   return (
@@ -85,29 +134,37 @@ export default function ChatScreen() {
           <Ionicons name="arrow-back" size={24} color="#2563eb" />
         </TouchableOpacity>
         <View className="flex-row items-center">
-          <View className="mr-2 h-10 w-10 rounded-full bg-gray-300" />
-          <Text className="text-lg font-bold">Travel Buddy</Text>
+          {recipient.avatar ? (
+            <Image source={{ uri: recipient.avatar }} className="mr-2 h-10 w-10 rounded-full" />
+          ) : (
+            <View className="mr-2 h-10 w-10 items-center justify-center rounded-full bg-gray-300">
+              <Text className="font-bold text-white">{recipient.name.charAt(0).toUpperCase()}</Text>
+            </View>
+          )}
+          <Text className="text-lg font-bold">{recipient.name}</Text>
         </View>
-        <TouchableOpacity className="p-2">
-          <Ionicons name="ellipsis-vertical" size={24} color="#2563eb" />
-        </TouchableOpacity>
+        <View className="w-10" />
       </View>
 
-      <FlatList
-        className="flex-1 p-4"
-        data={messages}
-        renderItem={renderMessage}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={{ flexGrow: 1 }}
-      />
+      {loading ? (
+        <View className="flex-1 items-center justify-center">
+          <Text className="text-gray-500">Loading messages...</Text>
+        </View>
+      ) : (
+        <FlatList
+          ref={flatListRef}
+          className="flex-1 p-4"
+          data={messages}
+          renderItem={renderMessage}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={{ flexGrow: 1 }}
+        />
+      )}
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
         <View className="flex-row items-center border-t border-gray-200 p-2">
-          <TouchableOpacity className="mr-2 p-2">
-            <Ionicons name="camera-outline" size={24} color="#2563eb" />
-          </TouchableOpacity>
           <TextInput
             className="flex-1 rounded-full bg-gray-100 px-4 py-2"
             placeholder="Type a message..."
@@ -116,7 +173,7 @@ export default function ChatScreen() {
           />
           <TouchableOpacity
             className="ml-2 rounded-full bg-blue-600 p-2"
-            onPress={sendMessage}
+            onPress={handleSendMessage}
             disabled={newMessage.trim() === ''}>
             <Ionicons name="send" size={20} color="white" />
           </TouchableOpacity>

@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from './supabase';
 
 export type TravelEntry = {
   id: string;
@@ -15,27 +15,82 @@ export type TravelEntry = {
   images: string[];
 };
 
-const STORAGE_KEY = 'travel_entries';
-
 export const saveEntry = async (entry: Omit<TravelEntry, 'id'>) => {
   try {
-    // Get existing entries
-    const existingEntriesJSON = await AsyncStorage.getItem(STORAGE_KEY);
-    const existingEntries: TravelEntry[] = existingEntriesJSON
-      ? JSON.parse(existingEntriesJSON)
-      : [];
+    // Get current user
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-    // Create new entry with ID
-    const newEntry: TravelEntry = {
-      ...entry,
-      id: Date.now().toString(),
+    if (!user) throw new Error('User not authenticated');
+
+    // Insert travel entry
+    const { data: entryData, error: entryError } = await supabase
+      .from('travel_entries')
+      .insert({
+        user_id: user.id,
+        title: entry.title,
+        description: entry.description,
+        date: entry.date,
+        location_name: entry.location.name,
+        latitude: entry.location.coordinates.latitude,
+        longitude: entry.location.coordinates.longitude,
+      })
+      .select()
+      .single();
+
+    if (entryError) throw entryError;
+
+    // Upload images
+    const imageUrls = [];
+    for (const imageUri of entry.images) {
+      // Extract filename from URI
+      const fileName = imageUri.split('/').pop() || '';
+      const fileExt = fileName.split('.').pop() || 'jpg';
+      const filePath = `${user.id}/${entryData.id}/${Date.now()}.${fileExt}`;
+
+      // Upload to Supabase Storage
+      const response = await fetch(imageUri);
+      const blob = await response.blob();
+      const { error: uploadError } = await supabase.storage
+        .from('travel_images')
+        .upload(filePath, blob, {
+          contentType: `image/${fileExt}`,
+        });
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from('travel_images').getPublicUrl(filePath);
+
+      imageUrls.push(publicUrl);
+
+      // Save image reference in database
+      const { error: imageError } = await supabase.from('travel_images').insert({
+        entry_id: entryData.id,
+        storage_path: filePath,
+      });
+
+      if (imageError) throw imageError;
+    }
+
+    // Return formatted entry
+    return {
+      id: entryData.id,
+      title: entryData.title,
+      description: entryData.description,
+      date: entryData.date,
+      location: {
+        name: entryData.location_name,
+        coordinates: {
+          latitude: entryData.latitude,
+          longitude: entryData.longitude,
+        },
+      },
+      images: imageUrls,
     };
-
-    // Save updated entries
-    const updatedEntries = [newEntry, ...existingEntries];
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedEntries));
-
-    return newEntry;
   } catch (error) {
     console.error('Error saving entry:', error);
     throw error;
@@ -44,8 +99,58 @@ export const saveEntry = async (entry: Omit<TravelEntry, 'id'>) => {
 
 export const getEntries = async (): Promise<TravelEntry[]> => {
   try {
-    const entriesJSON = await AsyncStorage.getItem(STORAGE_KEY);
-    return entriesJSON ? JSON.parse(entriesJSON) : [];
+    // Get current user
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) throw new Error('User not authenticated');
+
+    // Get entries
+    const { data: entries, error } = await supabase
+      .from('travel_entries')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('date', { ascending: false });
+
+    if (error) throw error;
+
+    // Get images for each entry
+    const formattedEntries = await Promise.all(
+      entries.map(async (entry) => {
+        const { data: images, error: imagesError } = await supabase
+          .from('travel_images')
+          .select('storage_path')
+          .eq('entry_id', entry.id);
+
+        if (imagesError) throw imagesError;
+
+        // Get public URLs for images
+        const imageUrls = images.map((img) => {
+          const {
+            data: { publicUrl },
+          } = supabase.storage.from('travel_images').getPublicUrl(img.storage_path);
+          return publicUrl;
+        });
+
+        return {
+          id: entry.id,
+          title: entry.title,
+          description: entry.description,
+          date: entry.date,
+          location: {
+            name: entry.location_name,
+            coordinates: {
+              latitude: entry.latitude,
+              longitude: entry.longitude,
+            },
+          },
+          images: imageUrls,
+        };
+      })
+    );
+
+    return formattedEntries;
   } catch (error) {
     console.error('Error getting entries:', error);
     return [];
@@ -54,8 +159,45 @@ export const getEntries = async (): Promise<TravelEntry[]> => {
 
 export const getEntryById = async (id: string): Promise<TravelEntry | null> => {
   try {
-    const entries = await getEntries();
-    return entries.find((entry) => entry.id === id) || null;
+    // Get entry
+    const { data: entry, error } = await supabase
+      .from('travel_entries')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) throw error;
+
+    // Get images
+    const { data: images, error: imagesError } = await supabase
+      .from('travel_images')
+      .select('storage_path')
+      .eq('entry_id', id);
+
+    if (imagesError) throw imagesError;
+
+    // Get public URLs for images
+    const imageUrls = images.map((img) => {
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from('travel_images').getPublicUrl(img.storage_path);
+      return publicUrl;
+    });
+
+    return {
+      id: entry.id,
+      title: entry.title,
+      description: entry.description,
+      date: entry.date,
+      location: {
+        name: entry.location_name,
+        coordinates: {
+          latitude: entry.latitude,
+          longitude: entry.longitude,
+        },
+      },
+      images: imageUrls,
+    };
   } catch (error) {
     console.error('Error getting entry by ID:', error);
     return null;
@@ -64,9 +206,25 @@ export const getEntryById = async (id: string): Promise<TravelEntry | null> => {
 
 export const deleteEntry = async (id: string): Promise<boolean> => {
   try {
-    const entries = await getEntries();
-    const updatedEntries = entries.filter((entry) => entry.id !== id);
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedEntries));
+    // Get images to delete from storage
+    const { data: images } = await supabase
+      .from('travel_images')
+      .select('storage_path')
+      .eq('entry_id', id);
+
+    // Delete from storage
+    if (images && images.length > 0) {
+      const paths = images.map((img) => img.storage_path);
+      const { error: storageError } = await supabase.storage.from('travel_images').remove(paths);
+
+      if (storageError) throw storageError;
+    }
+
+    // Delete entry (will cascade delete images from database)
+    const { error } = await supabase.from('travel_entries').delete().eq('id', id);
+
+    if (error) throw error;
+
     return true;
   } catch (error) {
     console.error('Error deleting entry:', error);
